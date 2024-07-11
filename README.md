@@ -1,23 +1,26 @@
 # Analysis-tool
-Script to analyze files
-
+The File Analysis Tool is a command-line application designed to analyze various file types, such as images, PDFs, and email files (.msg and .eml), for malicious content. The tool extracts text, identifies URLs, and provides insights into email headers, allowing security analysts to quickly assess potential threats. The application also supports opening URLs in a browser and performing WHOIS lookups on IP addresses.
 
 ### Required Libraries
 
 Install the required Python libraries using pip:
 
 ```
-pip install pytesseract pillow pymupdf requests extract_msg mail-parser colorama
+pip install PyMuPDF pytesseract Pillow extract-msg mail-parser requests colorama dnspython python-whois
 ```
 
 ### Example Usage
 To run the script from the terminal, navigate to the directory where you saved analyze_file.py and use the following command:
 
 ```
-python analyze_file.py /path/to/your/file.eml
+python analyze_file.py
 ```
 
 For example, if you have a file named email.eml in your current directory, you would run:
 ```
-python analyze_file.py email.eml
+email.eml
 ```
+### Command Options:
+-o : Open links in the browser.
+-w : Perform WHOIS lookup.
+-h : Analyze email header.
