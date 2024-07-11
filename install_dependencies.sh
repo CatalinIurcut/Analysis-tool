@@ -1,67 +1,51 @@
 #!/bin/bash
 
-# Function to check if a package is installed and install it if not
-check_and_install() {
-    package=$1
-    if ! dpkg -s $package > /dev/null 2>&1; then
-        echo "$package is not installed. Installing..."
-        sudo apt-get install -y $package
-    else
-        echo "$package is already installed."
-    fi
-}
-
-# Function to check if a Python package is installed and install it if not
-check_and_install_pip_package() {
-    package=$1
-    if ! python3 -m pip show $package > /dev/null 2>&1; then
-        echo "$package is not installed. Installing..."
-        python3 -m pip install $package
-    else
-        echo "$package is already installed."
-    fi
-}
-
 # Update package list
-echo "Updating package list..."
-sudo apt-get update
+sudo apt update
 
-# List of required Ubuntu packages
-ubuntu_packages=(
-    "python3"
-    "python3-pip"
-    "tesseract-ocr"
-    "poppler-utils"
-    "libtiff5-dev"
-    "libjpeg8-dev"
-    "zlib1g-dev"
-    "libfreetype6-dev"
-    "liblcms2-dev"
-    "libopenjp2-7"
-    "libopenjp2-7-dev"
-    "libwebp-dev"
-    "libharfbuzz-dev"
-    "libfribidi-dev"
-    "whois"
-)
+# Install system dependencies
+sudo apt install -y python3 python3-pip tesseract-ocr libtesseract-dev libmagic-dev
 
-# List of required Python packages
-python_packages=(
-    "PyMuPDF"
-    "extract-msg"
-    "mail-parser"
-    "requests"
-    "colorama"
-)
+# Install Python packages
+pip3 install PyMuPDF pytesseract Pillow extract-msg mail-parser requests colorama dnspython python-whois
 
-# Install required Ubuntu packages
-for package in "${ubuntu_packages[@]}"; do
-    check_and_install $package
-done
+# Verify installations
+echo "Verifying installations..."
 
-# Install required Python packages
-for package in "${python_packages[@]}"; do
-    check_and_install_pip_package $package
-done
+# Check Python version
+python3 --version
 
-echo "All dependencies installed."
+# Check if pip3 is installed
+pip3 --version
+
+# Check if Tesseract is installed
+tesseract --version
+
+# Check if PyMuPDF is installed
+python3 -c "import fitz; print('PyMuPDF installed successfully')"
+
+# Check if pytesseract is installed
+python3 -c "import pytesseract; print('pytesseract installed successfully')"
+
+# Check if Pillow is installed
+python3 -c "from PIL import Image; print('Pillow installed successfully')"
+
+# Check if extract-msg is installed
+python3 -c "import extract_msg; print('extract-msg installed successfully')"
+
+# Check if mail-parser is installed
+python3 -c "import mailparser; print('mail-parser installed successfully')"
+
+# Check if requests is installed
+python3 -c "import requests; print('requests installed successfully')"
+
+# Check if colorama is installed
+python3 -c "import colorama; print('colorama installed successfully')"
+
+# Check if dnspython is installed
+python3 -c "import dns.resolver; print('dnspython installed successfully')"
+
+# Check if python-whois is installed
+python3 -c "import whois; print('python-whois installed successfully')"
+
+echo "All dependencies installed successfully."
