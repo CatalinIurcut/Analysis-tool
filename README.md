@@ -9,6 +9,20 @@ Install the required Python libraries using pip:
 pip install PyMuPDF pytesseract Pillow extract-msg mail-parser requests colorama dnspython python-whois
 ```
 
+### Inslling dependencies (install_dependencies.sh)
+
+Make the Script Executable:
+```
+chmod +x install_dependencies.sh
+```
+
+Run the Script:
+
+```
+./install_dependencies.sh
+```
+
+
 ### Example Usage
 To run the script from the terminal, navigate to the directory where you saved analyze_file.py and use the following command:
 
