@@ -26,33 +26,43 @@ def identify_file_type(file_path):
     mime_type = result.stdout.decode().split(': ')[1].strip()
     return mime_type
 
-def extract_text_from_image(file_path):
+def extract_text_from_image(file_path, limit_lines=True):
     image = Image.open(file_path)
     text = pytesseract.image_to_string(image)
+    if limit_lines:
+        text = '\n'.join(text.splitlines()[:100])
     return text
 
-def extract_text_from_pdf(file_path):
+def extract_text_from_pdf(file_path, limit_lines=True):
     text = ""
     urls = []
     with fitz.open(file_path) as pdf_document:
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
-            text += page.get_text()
+            page_text = page.get_text()
+            if limit_lines and len(text.splitlines()) < 100:
+                text += '\n'.join(page_text.splitlines()[:100 - len(text.splitlines())])
+            else:
+                text += page_text
             links = page.get_links()
             for link in links:
                 if link["uri"]:
                     urls.append(link["uri"])
     return text, urls
 
-def extract_text_from_msg(file_path):
+def extract_text_from_msg(file_path, limit_lines=True):
     msg = extract_msg.Message(file_path)
     text = msg.body
+    if limit_lines:
+        text = '\n'.join(text.splitlines()[:100])
     urls = extract_links_from_text(text)
     return text, urls
 
-def extract_text_from_eml(file_path):
+def extract_text_from_eml(file_path, limit_lines=True):
     parsed_mail = mailparser.parse_from_file(file_path)
     text = parsed_mail.body
+    if limit_lines:
+        text = '\n'.join(text.splitlines()[:100])
     urls = extract_links_from_text(text)
     return text, urls
 
@@ -92,6 +102,18 @@ def analyze_email_headers(file_path):
     with open(file_path, 'rb') as f:
         msg = BytesParser(policy=policy.default).parse(f)
     
+    sender_info = {
+        "Sender Display Name": msg['From'],
+        "Sender Email Address": msg['Return-Path'],
+        "Sender IP Address": None,
+    }
+
+    recipient_info = {
+        "Recipient Display Name": msg['To'],
+        "Recipient Email Address": msg['Delivered-To'],
+        "Recipient IP Address": None,
+    }
+
     spf = dkim = dmarc = arc = "Not checked"
     try:
         spf = "pass" if "spf=pass" in msg['Authentication-Results'] else "fail"
@@ -113,7 +135,14 @@ def analyze_email_headers(file_path):
     except TypeError:
         arc = "No ARC found"
 
-    return spf, dkim, dmarc, arc
+    general_info = {
+        "SPF": spf,
+        "DKIM": dkim,
+        "DMARC": dmarc,
+        "ARC": arc,
+    }
+
+    return sender_info, recipient_info, general_info
 
 def analyze_file(file_path, options):
     file_type = identify_file_type(file_path)
@@ -122,61 +151,66 @@ def analyze_file(file_path, options):
     text = ""
     urls = []
     
+    limit_lines = '-all' not in options
+
     if file_type.startswith('image'):
-        if '-a' in options:
-            text = extract_text_from_image(file_path)
+        if not options or '-all' in options:
+            text = extract_text_from_image(file_path, limit_lines)
             urls = extract_links_from_text(text)
     elif file_type == 'application/pdf':
-        if '-a' in options:
-            text, urls = extract_text_from_pdf(file_path)
+        if not options or '-all' in options:
+            text, urls = extract_text_from_pdf(file_path, limit_lines)
     elif file_type == 'application/vnd.ms-outlook':
-        if '-a' in options:
-            text, urls = extract_text_from_msg(file_path)
+        if not options or '-all' in options:
+            text, urls = extract_text_from_msg(file_path, limit_lines)
     elif file_type == 'message/rfc822':
-        if '-a' in options:
-            text, urls = extract_text_from_eml(file_path)
+        if not options or '-all' in options:
+            text, urls = extract_text_from_eml(file_path, limit_lines)
     
-    # URL Analysis
-    if '-a' in options or '-o' in options:
-        print(f"{Fore.YELLOW}{'-'*40}\nURL Analysis:\n{'-'*40}{Style.RESET_ALL}")
-        for url in urls:
-            decoded_url = decode_safelink(url)
-            final_url, status_code = check_url(decoded_url)
-            print(f"{Fore.YELLOW}Original URL: {Fore.CYAN}{url}")
-            if url != decoded_url:
-                print(f"{Fore.YELLOW}Decoded URL: {Fore.CYAN}{decoded_url}")
-            print(f"{Fore.YELLOW}Final URL: {Fore.CYAN}{final_url}")
-            print(f"{Fore.YELLOW}HTTP Status Code: {Fore.CYAN}{status_code}")
-            # Check for tracing pixels
-            if "open?" in url or "track" in url:
-                print(f"{Fore.RED}Potential Tracing Pixel Detected: {Fore.CYAN}{url}")
-            print(f"{Fore.YELLOW}{'-'*40}{Style.RESET_ALL}")
+    # Base Analysis
+    if not options or '-all' in options:
+        if text:
+            print(f"{Fore.YELLOW}Extracted Text:\n{Fore.CYAN}{text}{Style.RESET_ALL}")
+        if urls:
+            print(f"{Fore.YELLOW}{'-'*40}\nURL Analysis:\n{'-'*40}{Style.RESET_ALL}")
+            for url in urls:
+                decoded_url = decode_safelink(url)
+                final_url, status_code = check_url(decoded_url)
+                print(f"{Fore.YELLOW}Original URL: {Fore.CYAN}{url}")
+                if url != decoded_url:
+                    print(f"{Fore.YELLOW}Decoded URL: {Fore.CYAN}{decoded_url}")
+                print(f"{Fore.YELLOW}Final URL: {Fore.CYAN}{final_url}")
+                print(f"{Fore.YELLOW}HTTP Status Code: {Fore.CYAN}{status_code}")
+                # Check for tracing pixels
+                if "open?" in url or "track" in url:
+                    print(f"{Fore.RED}Potential Tracing Pixel Detected: {Fore.CYAN}{url}")
+                print(f"{Fore.YELLOW}{'-'*40}{Style.RESET_ALL}")
 
     return urls
 
 def print_grinch():
     grinch = """
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠐⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠤⢐⣒⣉⣉⣉⣉⣒⡲⢤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡤⢊⣴⣾⣿⣿⣿⣿⣿⣿⣿⣿⣷⣌⡳⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠀⠤⠤⠤⠞⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡜⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⢖⣩⣴⣶⣾⣿⡇⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣈⣀⣒⡒⠢⢄⡀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡜⣡⣿⣿⣿⣿⣿⣿⡇⢸⣿⣿⣿⣿⣿⣿⣿⣿⠹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣍⠢⡄⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡼⢰⣿⣿⣿⣿⣿⣿⣿⣇⠘⣿⣿⣿⣿⣿⣿⣿⣿⠇⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡜⢆⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⣈⠛⠿⣿⣿⣿⡿⠋⣰⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡜⣆⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡠⠤⠾⢡⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣶⣦⣤⣬⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⢸⠀
-⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⡠⢚⣡⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠈⡆
-⠈⣟⠲⢄⡀⠀⠀⣀⠴⢋⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⣻⣶⣬⣽⣿⣿⣿⣿⣿⣿⣿⣿⠀⡇
-⠀⠸⡄⣷⣬⣍⣭⣴⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⢸⠁
-⠀⠀⢳⡸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⢿⠿⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢇⡎⠀
-⠀⠀⠀⢣⠹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢟⣥⣶⣿⣿⣿⣶⣌⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢋⡞⠀⠀
-⠀⠀⠀⠀⠳⡙⢿⣿⣿⣿⣿⣿⣿⣿⠃⣾⣿⣿⣿⣿⣿⣿⣿⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⡙⢿⣿⣿⣿⣿⣿⣿⠿⢋⡵⠋⠀⠀⠀
-⠀⠀⠀⠀⠀⠈⠢⣙⠿⢿⣿⣿⣿⣿⡄⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⡮⣭⣉⡭⢭⠔⠚⠁⠀⡀⠀⢰⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠙⠒⠲⠭⠭⠕⢣⡘⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⣱⠁⠀⠀⠀⠀⠐⠂⠀⡇⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠀⠀⠂⠀⠳⡙⢿⣿⣿⣿⣿⣿⣿⣿⣿⡿⢋⢧⡙⢿⣿⣿⣿⣿⣿⣿⣿⣿⠿⢋⠔⠁⠀⠀⠸⠀⠀⠘⠀⠀⠁⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠢⣝⣛⠛⠛⠛⣛⣋⠥⠚⠁⠀⠉⠒⠬⢭⣛⣛⣛⣫⠭⠔⠊⠁⠀⢰⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⢀⠀⠉⢉⠉⢁⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⢰⠀⠀⢀⠀⠀⡆⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠀⠈⠀⠀⠈⠀⠈⠀⠀⠠⠆⠀⠆⠀⠀⠀⠀⠈⠀⠀⠘⠀⠀⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢠⣾⣷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⣰⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⢰⣿⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⢀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣤⣄⣀⣀⣤⣤⣶⣾⣿⣿⣿⡷
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠁
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠁⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀⠀
+⣿⣿⣿⡇⠀⡾⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠁⠀⠀⠀⠀⠀
+⣿⣿⣿⣧⡀⠁⣀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠉⢹⠉⠙⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣀⠀⣀⣼⣿⣿⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠀⠤⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⠿⣿⣿⣿⣿⣿⣿⣿⠿⠋⢃⠈⠢⡁⠒⠄⡀⠈⠁⠀⠀⠀⠀⠀⠀⠀
+CI⠟⠁⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠈⠆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
     """
     print(grinch)
 
@@ -191,49 +225,58 @@ def main():
     print_grinch()
     print(f"{Fore.YELLOW}Welcome to the File Analysis Tool!{Style.RESET_ALL}")
     print(f"{Fore.YELLOW}Commands:{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}analyze [options] <file_path>{Style.RESET_ALL} - Analyze a file. Options: -a (all functions), -o (open links), -w (whois), -h (header)")
+    print(f"{Fore.CYAN}[options] <file_path>{Style.RESET_ALL} - Analyze a file. Options: -o (open links), -w (whois), -h (header)")
     print(f"{Fore.CYAN}exit{Style.RESET_ALL} - Exit the application.")
     
     readline.set_completer(completer)
     readline.parse_and_bind("tab: complete")
 
     while True:
-        command = input(f"{Fore.CYAN}Enter a command: {Style.RESET_ALL}").strip().lower().split()
+        command_input = input(f"{Fore.CYAN}Enter a command: {Style.RESET_ALL}").strip()
+        command = command_input.split()
         if not command:
             continue
 
-        action = command[0]
-        options = command[1:-1]
-        file_path = command[-1] if command else None
+        options = [opt for opt in command if opt.startswith('-')]
+        file_path = ' '.join([part for part in command if not part.startswith('-')])
 
-        if action == "analyze":
-            if file_path and not os.path.isabs(file_path):
-                file_path = os.path.join(os.getcwd(), file_path)
-            if not os.path.exists(file_path):
-                print(f"{Fore.RED}File not found: {file_path}{Style.RESET_ALL}")
-                continue
-
-            # Perform specified analysis functions
-            if '-a' in options or '-o' in options or '-h' in options:
-                urls = analyze_file(file_path, options)
-
-            if '-o' in options:
-                open_links_in_browser(urls)
-            if '-h' in options and (file_path.endswith('.eml') or file_path.endswith('.msg')):
-                spf, dkim, dmarc, arc = analyze_email_headers(file_path)
-                print(f"{Fore.YELLOW}SPF: {Fore.CYAN}{spf}")
-                print(f"{Fore.YELLOW}DKIM: {Fore.CYAN}{dkim}")
-                print(f"{Fore.YELLOW}DMARC: {Fore.CYAN}{dmarc}")
-                print(f"{Fore.YELLOW}ARC: {Fore.CYAN}{arc}{Style.RESET_ALL}")
-            if '-w' in options:
-                sender_ip = input(f"{Fore.CYAN}Enter the sender's IP address: {Style.RESET_ALL}").strip()
-                whois_info = perform_whois(sender_ip)
-                print(f"{Fore.YELLOW}WHOIS Information:\n{whois_info}{Style.RESET_ALL}")
-
-        elif action == "exit":
+        if file_path.lower() == "exit":
             break
-        else:
-            print(f"{Fore.RED}Unknown command: {action}{Style.RESET_ALL}")
+
+        if file_path and not os.path.isabs(file_path):
+            file_path = os.path.join(os.getcwd(), file_path)
+        
+        if not os.path.exists(file_path):
+            print(f"{Fore.RED}File not found: {file_path}{Style.RESET_ALL}")
+            continue
+
+        # Perform base analysis by default
+        urls = analyze_file(file_path, options)
+
+        if '-o' in options:
+            open_links_in_browser(urls)
+        if '-h' in options and (file_path.endswith('.msg') or file_path.endswith('.eml')):
+            sender_info, recipient_info, general_info = analyze_email_headers(file_path)
+            print(f"{Fore.YELLOW}Sender Information:{Style.RESET_ALL}")
+            for key, value in sender_info.items():
+                print(f"{Fore.CYAN}{key}: {value}{Style.RESET_ALL}")
+
+            print(f"{Fore.YELLOW}Recipient Information:{Style.RESET_ALL}")
+            for key, value in recipient_info.items():
+                print(f"{Fore.CYAN}{key}: {value}{Style.RESET_ALL}")
+
+            print(f"{Fore.YELLOW}General Information:{Style.RESET_ALL}")
+            for key, value in general_info.items():
+                print(f"{Fore.CYAN}{key}: {value}{Style.RESET_ALL}")
+        elif '-h' in options:
+            print(f"{Fore.RED}Header analysis is only available for .eml or .msg files{Style.RESET_ALL}")
+        if '-w' in options:
+            ip = sender_info["Sender IP Address"] if 'sender_info' in locals() else None
+            if ip:
+                whois_info = perform_whois(ip)
+                print(f"{Fore.YELLOW}WHOIS Information:\n{Fore.CYAN}{whois_info}{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}No sender IP address found for WHOIS lookup{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     main()
